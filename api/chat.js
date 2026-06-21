@@ -100,31 +100,38 @@ export default async function handler(req, res) {
       return
     }
 
-    /* Call Anthropic API — API key stays server-side, never sent to browser */
-    const response = await fetch('https://api.anthropic.com/v1/messages', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'x-api-key': process.env.ANTHROPIC_API_KEY,
-        'anthropic-version': '2023-06-01',
-      },
-      body: JSON.stringify({
-        model: 'claude-haiku-4-5-20251001',
-        max_tokens: 400,
-        system: SYSTEM_PROMPT,
-        messages: messages,
-      }),
-    })
+    /* Convert messages into a single text block Gemini understands.
+       Gemini's free API uses a simpler format than Claude/OpenAI. */
+    const conversationText = messages
+      .map((m) => `${m.role === 'user' ? 'Visitor' : 'Assistant'}: ${m.content}`)
+      .join('\n')
+
+    const fullPrompt = `${SYSTEM_PROMPT}\n\nConversation so far:\n${conversationText}\n\nAssistant:`
+
+    /* Call Google Gemini API (free tier) — key stays server-side */
+    const response = await fetch(
+      `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${process.env.GEMINI_API_KEY}`,
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          contents: [{ parts: [{ text: fullPrompt }] }],
+          generationConfig: { maxOutputTokens: 400 },
+        }),
+      }
+    )
 
     const data = await response.json()
 
     if (!response.ok) {
-      console.error('Anthropic API error:', data)
+      console.error('Gemini API error:', data)
       res.status(500).json({ error: 'AI service error' })
       return
     }
 
-    const reply = data.content?.[0]?.text || "Sorry, I couldn't generate a response."
+    const reply =
+      data.candidates?.[0]?.content?.parts?.[0]?.text ||
+      "Sorry, I couldn't generate a response."
 
     res.status(200).json({ reply })
 
